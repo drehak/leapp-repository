@@ -6,9 +6,9 @@ class VimModel(Model):
     """
     Class VimModel
 
-    Members:
-    topic
-    vim_configs - list of strings which are full paths to found vim configuration files.
+    Attributes:
+    - topic
+    - vim_configs - list of strings which are full paths to found vim configuration files.
     """
 
     topic = SystemInfoTopic
