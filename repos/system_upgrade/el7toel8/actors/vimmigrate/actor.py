@@ -3,6 +3,7 @@ from leapp.libraries.common.reporting import report_generic
 from leapp.models import Report, VimModel
 from leapp.tags import ApplicationsPhaseTag, IPUWorkflowTag
 
+from os import access, W_OK
 
 class VimMigrate(Actor):
     """
@@ -14,7 +15,9 @@ class VimMigrate(Actor):
     consumes = (VimModel,)
     produces = (Report,)
     tags = (ApplicationsPhaseTag, IPUWorkflowTag)
-    changes = [
+
+    """ Macros for adding into configuration file"""
+    _changes = [
                 'let skip_defaults_vim=1',
                 'set t_BE='
               ]
@@ -22,37 +25,35 @@ class VimMigrate(Actor):
 
     def insert_string(self, string, path):
         """
-        insert_string
-
         Insert string into a file
 
-        parameters:
-        - string - string
-        - path - string
-
-        returns boolean
+        :param str string: string which will be inserted
+        :param str path: string representing path
         """
+
+        if not access(path, W_OK):
+            raise OSError('File {} does not have writing permissions.'.format(path))
 
         try:
             with open(path, 'a') as f:
                 f.write(string + '\n')
-                return True
         except IOError:
-            return False
+            raise IOError('Error during writing to file {}.'.format(path))
 
     def process(self):
         for configs_list in self.consume(VimModel):
-            if configs_list == []:
+            if not configs_list:
                 self.log.info('Vim configuration files will not be migrated, no Vim configuration files exists.')
             else:
                 for vim_config in configs_list.vim_configs:
-                    for change in changes:
-                        result = self.insert_string(change, vim_config)
-                        if result is False:
-                            raise StopActorExecutionError('Vimmigrate actor was not able to open configuration file {}'.format(vim_config))
+                    for change in _changes:
+                        try:
+                            self._insert_string(change, vim_config)
+                        except (OSError, IOError) as error:
+                            raise StopActorExecutionError(error)
 
                 report_generic(
-                                title='Vim was migrated.',
-                                summary='Changed strings were added into configuration files to ensure behavior from Vim 7.4.',
+                                title='Vim was migrated',
+                                summary='Changed strings were added into configuration files to ensure behavior from Vim 7.4',
                                 severity='low'
                               )

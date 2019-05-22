@@ -4,12 +4,13 @@ from leapp.topics import SystemInfoTopic
 
 class VimModel(Model):
     """
-    Class VimModel
+    Represents facts about Vim configuration, explicitly
+    paths to configuration files.
 
-    Attributes:
-    - topic
-    - vim_configs - list of strings which are full paths to found vim configuration files.
+    Attribute vim_configs can be 'None' or can contain list of
+    strings representing full path to Vim configuration files.
     """
 
     topic = SystemInfoTopic
+    """List of strings representing full paths to configuration files"""
     vim_configs = fields.List(fields.String())
