@@ -32,4 +32,3 @@ def update_config(path):
             f.write(fmt_input)
     except IOError:
         raise IOError('Error during writing to file: {}.'.format(path))
-
