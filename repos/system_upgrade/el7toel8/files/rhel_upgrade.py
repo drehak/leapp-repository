@@ -1,11 +1,21 @@
 # plugin inspired by "system_upgrade.py" from rpm-software-management
+from __future__ import print_function
 
 import json
+import sys
 
 import dnf
 import dnf.cli
 
-CMDS = ['download', 'upgrade']
+CMDS = ['download', 'upgrade', 'check']
+
+
+class DoNotDownload(Exception):
+    pass
+
+
+def _do_not_download_packages(packages, progress=None, total=None):
+    raise DoNotDownload()
 
 
 class RhelUpgradeCommand(dnf.cli.Command):
@@ -23,6 +33,22 @@ class RhelUpgradeCommand(dnf.cli.Command):
                             metavar="[%s]" % "|".join(CMDS))
         parser.add_argument('filename')
 
+    def _process_packages(self, pkg_set, op):
+        '''
+        Adds list of packages for given operation to the transaction
+        '''
+        pkgs_notfound = []
+
+        for pkg_spec in pkg_set:
+            try:
+                op(pkg_spec)
+            except dnf.exceptions.MarkingError:
+                self.pkgs_notfound.append(pkg_spec)
+        if pkgs_notfound:
+            err_str = ('Packages marked by Leapp for installation/removal/upgrade not found '
+                       'in repository metadata: ') + ' '.join(pkgs_notfound)
+            raise dnf.exceptions.MarkingError(err_str)
+
     def pre_configure(self):
         with open(self.opts.filename) as fo:
             self.plugin_data = json.load(fo)
@@ -31,10 +57,10 @@ class RhelUpgradeCommand(dnf.cli.Command):
 
     def configure(self):
         self.cli.demands.root_user = True
-        self.cli.demands.resolving = True
+        self.cli.demands.resolving = self.opts.tid[0] != 'check'
         self.cli.demands.available_repos = True
         self.cli.demands.sack_activation = True
-        self.cli.demands.cacheonly = True if self.opts.tid[0] == 'upgrade' else False
+        self.cli.demands.cacheonly = self.opts.tid[0] == 'upgrade'
         self.cli.demands.allow_erasing = self.plugin_data['dnf_conf']['allow_erasing']
         self.base.conf.protected_packages = []
         self.base.conf.best = self.plugin_data['dnf_conf']['best']
@@ -42,6 +68,9 @@ class RhelUpgradeCommand(dnf.cli.Command):
         self.base.conf.gpgcheck = self.plugin_data['dnf_conf']['gpgcheck']
         self.base.conf.debug_solver = self.plugin_data['dnf_conf']['debugsolver']
         self.base.conf.module_platform_id = self.plugin_data['dnf_conf']['platform_id']
+        installroot = self.plugin_data['dnf_conf'].get('installroot')
+        if installroot:
+            self.base.conf.installroot = installroot
         if self.plugin_data['dnf_conf']['test_flag'] and self.opts.tid[0] == 'download':
             self.base.conf.tsflags.append("test")
 
@@ -50,30 +79,52 @@ class RhelUpgradeCommand(dnf.cli.Command):
         for repo in self.base.repos.all():
             if repo.id in enabled_repos:
                 repo.skip_if_unavailable = False
+                if not self.base.conf.gpgcheck:
+                    repo.gpgcheck = False
                 repo.enable()
 
     def run(self):
-        self.base.add_remote_rpms(self.plugin_data['pkgs_info']['local_rpms'])
+        # takes local rpms, creates Package objects from them, and then adds them to the sack as virtual repository
+        local_rpm_objects = self.base.add_remote_rpms(self.plugin_data['pkgs_info']['local_rpms'])
 
-        for pkg_spec in self.plugin_data['pkgs_info']['to_remove']:
-            try:
-                self.base.remove(pkg_spec)
-            except dnf.exceptions.MarkingError:
-                self.pkgs_notfound.append(pkg_spec)
+        for pkg in local_rpm_objects:
+            self.base.package_install(pkg)
 
-        for pkg_spec in self.plugin_data['pkgs_info']['to_install']:
-            try:
-                self.base.install(pkg_spec)
-            except dnf.exceptions.MarkingError:
-                self.pkgs_notfound.append(pkg_spec)
+        to_install_local = self.plugin_data['pkgs_info']['local_rpms']
+        to_install = self.plugin_data['pkgs_info']['to_install']
+        to_remove = self.plugin_data['pkgs_info']['to_remove']
+        to_upgrade = self.plugin_data['pkgs_info']['to_upgrade']
 
-        q = self.base.sack.query().installed()
-        for pkg in q:
-            if pkg.name not in (self.plugin_data['pkgs_info']['to_install']
-                                + self.plugin_data['pkgs_info']['to_remove']):
-                self.base.upgrade(pkg.name)
+        # Local (on filesystem) packages to be installed.
+        # add_remote_rpms() accepts list of packages
+
+        self.base.add_remote_rpms(to_install_local)
+
+        # Packages to be removed
+        self._process_packages(to_remove, self.base.remove)
+        # Packages to be installed
+        self._process_packages(to_install, self.base.install)
+        # Packages to be upgraded
+        self._process_packages(to_upgrade, self.base.upgrade)
 
         self.base.distro_sync()
+
+        if self.opts.tid[0] == 'check':
+            try:
+                self.base.resolve(allow_erasing=self.cli.demands.allow_erasing)
+            except dnf.exceptions.DepsolveError as e:
+                print(str(e), file=sys.stderr)
+                raise
+
+            # We are doing this to avoid downloading the packages in the check phase
+            self.base.download_packages = _do_not_download_packages
+            try:
+                displays = []
+                if self.cli.demands.transaction_display is not None:
+                    displays.append(self.cli.demands.transaction_display)
+                self.base.do_transaction(display=displays)
+            except DoNotDownload:
+                print('Check completed.')
 
 
 class RhelUpgradePlugin(dnf.Plugin):

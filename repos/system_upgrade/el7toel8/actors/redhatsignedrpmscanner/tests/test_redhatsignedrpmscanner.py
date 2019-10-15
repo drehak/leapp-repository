@@ -1,14 +1,15 @@
 import mock
 
 from leapp.libraries.common import rpms
-from leapp.models import fields, InstalledRPM, InstalledRedHatSignedRPM, InstalledUnsignedRPM, Model, RPM
+from leapp.models import fields, InstalledRPM, InstalledRedHatSignedRPM, InstalledUnsignedRPM, Model, RPM, IPUConfig
+from leapp.libraries.common.config import mock_configs
 from leapp.snactor.fixture import current_actor_context
 
 
 RH_PACKAGER = 'Red Hat, Inc. <http://bugzilla.redhat.com/bugzilla>'
 
 
-class TestModel(Model):
+class MockModel(Model):
     topic = RPM.topic
     list_field = fields.List(fields.Integer(), default=[42])
     list_field_nullable = fields.Nullable(fields.List(fields.String()))
@@ -42,11 +43,30 @@ def test_actor_execution_with_signed_unsigned_data(current_actor_context):
             pgpsig='RSA/SHA256, Mon 01 Jan 1970 00:00:00 AM -03, Key ID 45689c882fa658e0')]
 
     current_actor_context.feed(InstalledRPM(items=installed_rpm))
-    current_actor_context.run()
+    current_actor_context.run(config_model=mock_configs.CONFIG)
     assert current_actor_context.consume(InstalledRedHatSignedRPM)
     assert len(current_actor_context.consume(InstalledRedHatSignedRPM)[0].items) == 5
     assert current_actor_context.consume(InstalledUnsignedRPM)
     assert len(current_actor_context.consume(InstalledUnsignedRPM)[0].items) == 4
+
+
+def test_all_rpms_signed(current_actor_context):
+    installed_rpm = [
+        RPM(name='sample01', version='0.1', release='1.sm01', epoch='1', packager=RH_PACKAGER, arch='noarch',
+            pgpsig='RSA/SHA256, Mon 01 Jan 1970 00:00:00 AM -03, Key ID 199e2f91fd431d51'),
+        RPM(name='sample02', version='0.1', release='1.sm01', epoch='1', packager=RH_PACKAGER, arch='noarch',
+            pgpsig='SOME_OTHER_SIG_X'),
+        RPM(name='sample03', version='0.1', release='1.sm01', epoch='1', packager=RH_PACKAGER, arch='noarch',
+            pgpsig='RSA/SHA256, Mon 01 Jan 1970 00:00:00 AM -03, Key ID 5326810137017186'),
+        RPM(name='sample04', version='0.1', release='1.sm01', epoch='1', packager=RH_PACKAGER, arch='noarch',
+            pgpsig='SOME_OTHER_SIG_X')
+    ]
+
+    current_actor_context.feed(InstalledRPM(items=installed_rpm))
+    current_actor_context.run(config_model=mock_configs.CONFIG_ALL_SIGNED)
+    assert current_actor_context.consume(InstalledRedHatSignedRPM)
+    assert len(current_actor_context.consume(InstalledRedHatSignedRPM)[0].items) == 4
+    assert not current_actor_context.consume(InstalledUnsignedRPM)[0].items
 
 
 def test_gpg_pubkey_pkg(current_actor_context):
@@ -58,7 +78,7 @@ def test_gpg_pubkey_pkg(current_actor_context):
     ]
 
     current_actor_context.feed(InstalledRPM(items=installed_rpm))
-    current_actor_context.run()
+    current_actor_context.run(config_model=mock_configs.CONFIG)
     assert current_actor_context.consume(InstalledRedHatSignedRPM)
     assert len(current_actor_context.consume(InstalledRedHatSignedRPM)[0].items) == 1
     assert current_actor_context.consume(InstalledUnsignedRPM)
@@ -68,30 +88,30 @@ def test_gpg_pubkey_pkg(current_actor_context):
 def test_create_lookup():
     # NOTE(ivasilev) Ideally should be tested separately from the actor, but since library
     # testing functionality is not yet implemented in leapp-repository the tests will reside here.
-    model = TestModel()
+    model = MockModel()
     # plain non-empty list
     model.list_field.extend([-42])
     with mock.patch('leapp.libraries.stdlib.api.consume', return_value=(model,)):
         # monkeypatch.setattr('leapp.libraries.stdlib.api.consume', consume_message_mocked)
-        lookup = rpms.create_lookup(TestModel, 'list_field', 'real')
+        lookup = rpms.create_lookup(MockModel, 'list_field', 'real')
         assert {42, -42} == lookup
     # empty list
     model.list_field = []
     with mock.patch('leapp.libraries.stdlib.api.consume', return_value=(model,)):
-        lookup = rpms.create_lookup(TestModel, 'list_field', 'real')
+        lookup = rpms.create_lookup(MockModel, 'list_field', 'real')
         assert {} == lookup
     # nullable list without default
     assert model.list_field_nullable is None
     with mock.patch('leapp.libraries.stdlib.api.consume', return_value=(model,)):
-        lookup = rpms.create_lookup(TestModel, 'list_field_nullable', 'real')
+        lookup = rpms.create_lookup(MockModel, 'list_field_nullable', 'real')
         assert {} == lookup
     # improper usage: lookup from non iterable field
     with mock.patch('leapp.libraries.stdlib.api.consume', return_value=(model,)):
-        lookup = rpms.create_lookup(TestModel, 'int_field', 'real')
+        lookup = rpms.create_lookup(MockModel, 'int_field', 'real')
         assert {} == lookup
     # improper usage: lookup from iterable but bad attribute
     with mock.patch('leapp.libraries.stdlib.api.consume', return_value=(model,)):
-        lookup = rpms.create_lookup(TestModel, 'list_field', 'nosuchattr')
+        lookup = rpms.create_lookup(MockModel, 'list_field', 'nosuchattr')
         assert {} == lookup
 
 
@@ -104,7 +124,7 @@ def test_has_package(current_actor_context):
     ]
 
     current_actor_context.feed(InstalledRPM(items=installed_rpm))
-    current_actor_context.run()
+    current_actor_context.run(config_model=mock_configs.CONFIG)
     assert rpms.has_package(InstalledRedHatSignedRPM, 'sample01', context=current_actor_context)
     assert not rpms.has_package(InstalledRedHatSignedRPM, 'nosuchpackage', context=current_actor_context)
     assert rpms.has_package(InstalledUnsignedRPM, 'sample02', context=current_actor_context)

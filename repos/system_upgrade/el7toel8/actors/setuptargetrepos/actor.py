@@ -1,13 +1,10 @@
 import platform
 
 from leapp.actors import Actor
-from leapp.libraries.common import reporting
-from leapp.libraries.stdlib.config import is_verbose
-from leapp.models import CustomTargetRepository, RHELTargetRepository, RepositoriesBlacklisted, \
-    RepositoriesFacts, RepositoriesMap, RepositoriesSetupTasks, TargetRepositories, \
-    UsedRepositories
-from leapp.reporting import Report
-from leapp.tags import IPUWorkflowTag, ChecksPhaseTag
+from leapp.models import (CustomTargetRepository, RepositoriesBlacklisted, RepositoriesFacts, RepositoriesMap,
+                          RepositoriesSetupTasks, RHELTargetRepository, SkippedRepositories, TargetRepositories,
+                          UsedRepositories)
+from leapp.tags import FactsPhaseTag, IPUWorkflowTag
 
 
 class SetupTargetRepos(Actor):
@@ -26,26 +23,8 @@ class SetupTargetRepos(Actor):
                 RepositoriesFacts,
                 RepositoriesBlacklisted,
                 UsedRepositories)
-    produces = (TargetRepositories, Report,)
-    tags = (IPUWorkflowTag, ChecksPhaseTag)
-
-    def report_skipped_repos(self, repos, pkgs):
-        title = 'Some enabled RPM repositories are unknown to Leapp'
-        summary_data = []
-        summary_data.append('The following repositories with Red Hat-signed packages are unknown to Leapp:')
-        summary_data.extend(['- ' + r for r in repos])
-        summary_data.append('And the following packages installed from those repositories may not be upgraded:')
-        summary_data.extend(['- ' + p for p in pkgs])
-        summary = '\n'.join(summary_data)
-        reporting.report_with_remediation(
-            title=title,
-            summary=summary,
-            remediation='You can file a request to add this repository to the scope of in-place upgrades '
-                        'by filing a support ticket',
-            severity='low')
-
-        if is_verbose():
-            self.log.info('\n'.join([title, summary]))
+    produces = (TargetRepositories, SkippedRepositories)
+    tags = (IPUWorkflowTag, FactsPhaseTag)
 
     def process(self):
         # TODO: Think about Beta and Alpha repositories. How will we tell we
@@ -70,9 +49,9 @@ class SetupTargetRepos(Actor):
                 if platform.machine() != repo_map.arch:
                     continue
 
-                mapped_repos.add(repo_map.from_id)
-                if repo_map.from_id in enabled_repos:
-                    rhel_repos.append(RHELTargetRepository(repoid=repo_map.to_id))
+                mapped_repos.add(repo_map.from_repoid)
+                if repo_map.from_repoid in enabled_repos:
+                    rhel_repos.append(RHELTargetRepository(repoid=repo_map.to_repoid))
 
         skipped_repos = enabled_repos.difference(mapped_repos)
 
@@ -83,13 +62,13 @@ class SetupTargetRepos(Actor):
                 for repo in repo_file.data:
                     enabled_repos.add(repo.repoid)
 
-        skipped_repos = skipped_repos.intersection(used.keys())
+        skipped_repos = skipped_repos.intersection(set(used.keys()))
 
         if skipped_repos:
-            pkgs = []
+            pkgs = set()
             for repo in skipped_repos:
-                pkgs.extend(used[repo])
-            self.report_skipped_repos(skipped_repos, pkgs)
+                pkgs.update(used[repo])
+            self.produce(SkippedRepositories(repos=list(skipped_repos), packages=list(pkgs)))
 
         for task in self.consume(RepositoriesSetupTasks):
             for repo in task.to_enable:

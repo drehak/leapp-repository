@@ -13,7 +13,7 @@ import six
 from leapp.libraries.stdlib import CalledProcessError, api, run
 from leapp.models import SysctlVariablesFacts, SysctlVariable, ActiveKernelModulesFacts, ActiveKernelModule, \
     KernelModuleParameter, UsersFacts, User, GroupsFacts, Group, RepositoriesFacts, RepositoryFile, RepositoryData, \
-    SELinuxFacts, fields, FirewallStatus, FirewallsFacts
+    SELinuxFacts, fields, FirewallStatus, FirewallsFacts, FirmwareFacts
 
 
 def aslist(f):
@@ -267,4 +267,10 @@ def get_firewalls_status():
     return FirewallsFacts(
         firewalld=_get_firewall_status('firewalld'),
         iptables=_get_firewall_status('iptables'),
+        ip6tables=_get_firewall_status('ip6tables'),
     )
+
+
+def get_firmware():
+    firmware = 'efi' if os.path.isdir('/sys/firmware/efi') else 'bios'
+    return FirmwareFacts(firmware=firmware)
