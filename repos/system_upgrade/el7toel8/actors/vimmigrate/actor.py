@@ -1,7 +1,7 @@
-
 from leapp.actors import Actor
 from leapp.libraries.actor import library
 from leapp.libraries.common.reporting import report_with_remediation
+from leapp.libraries.common.rpms import has_package
 from leapp.models import Report, InstalledRedHatSignedRPM
 from leapp.tags import ApplicationsPhaseTag, IPUWorkflowTag
 
@@ -19,12 +19,7 @@ class VimMigrate(Actor):
     def process(self):
         error_list = []
 
-        # FIXME: use has_pkg from repo shared library once it is implemented
-        rh_rpms = [pkg.name for pkg in next(self.consume(InstalledRedHatSignedRPM), InstalledRedHatSignedRPM()).items]
-
-        for pkg, config_file in library.vim_configs.items():
-            if pkg not in rh_rpms:
-                continue
+        for [pkg, config_file in library.vim_configs.items() if has_package(InstalledRedHatSignedRPM, pkg)]:
             try:
                 library.update_config(config_file)
             except (OSError, IOError) as error:
@@ -39,5 +34,4 @@ class VimMigrate(Actor):
                              ' into those files:\n    {}'.format('    \n'.join(library.new_macros))),
                 severity='medium'
             )
-
             return

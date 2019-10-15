@@ -1,5 +1,6 @@
 from leapp.actors import Actor
 from leapp.libraries.common.reporting import report_generic
+from leapp.libraries.common.rpms import has_package
 from leapp.models import InstalledRedHatSignedRPM, Report
 from leapp.tags import ChecksPhaseTag, IPUWorkflowTag
 
@@ -16,16 +17,7 @@ class VimCheck(Actor):
 
     def process(self):
         vim_pkgs = ['vim-minimal', 'vim-enhanced']
-        is_any_vim_pkg_installed = False
-
-        # FIXME: use has_pkg from repo shared library once it is implemented
-        rh_rpms = [pkg.name for pkg in next(self.consume(InstalledRedHatSignedRPM), InstalledRedHatSignedRPM()).items]
-
-        for pkg in vim_pkgs:
-            if pkg in rh_rpms:
-                is_any_vim_pkg_installed = True
-
-        if is_any_vim_pkg_installed:
+        if any(has_package(InstalledRedHatSignedRPM, pkg) for pkg in vim_pkgs):
             # NOTE: informational message about planned fixes during IPU
             report_generic(
                 title='Vim configuration files will be migrated',
