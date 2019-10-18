@@ -3,6 +3,7 @@ from leapp.libraries.actor import library
 from leapp.libraries.common.reporting import report_with_remediation
 from leapp.libraries.common.rpms import has_package
 from leapp.models import Report, InstalledRedHatSignedRPM
+from leapp.reporting import create_report
 from leapp.tags import ApplicationsPhaseTag, IPUWorkflowTag
 
 
@@ -26,12 +27,15 @@ class VimMigrate(Actor):
                 self.log.warning('Cannot modify the {} config file.'.format(config_file))
                 error_list.append((config_file, error))
         if error_list:
-            report_with_remediation(
-                title='The Vim configuration has not been updated',
-                summary=('The files below has not been modified (error message included):'
-                         ''.join(['    - {}: {}'.format(err[0], err[1]) for err in error_list])),
-                remediation=('If you want keep original behaviour of vim, append the following lines'
-                             ' into those files:\n    {}'.format('    \n'.join(library.new_macros))),
-                severity='medium'
+            create_report(
+                reporting.Title('The Vim configuration has not been updated'),
+                reporting.Summary('The files below have not been modified (error message included):'
+                                  ''.join(['    - {}: {}'.format(err[0], err[1]) for err in error_list])),
+                reporting.Remediation(
+                    hint='If you want keep original behaviour of vim, append the following lines'
+                         ' into those files:\n    {}'.format('    \n'.join(library.new_macros))
+                ),
+                reporting.Severity(reporting.Severity.MEDIUM),
+                reporting.Tags([reporting.Tags.TOOLS])
             )
             return
