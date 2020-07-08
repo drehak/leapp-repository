@@ -35,12 +35,26 @@ def parse_repofile(repofile):
     return RepositoryFile(file=repofile, data=data)
 
 
+def get_repodirs():
+    """
+    Return all directories yum scans for repository files.
+    By default, their paths on RHEL 7 should be:
+    ['/etc/yum.repos.d', '/etc/yum/repos.d', '/etc/distro.repos.d']
+
+    ATTENTION: Module dnf is required. The paths may not exist.
+    """
+    import dnf  # pylint: disable=import-outside-toplevel
+    with dnf.base.Base() as base:
+        base.conf.read(priority=dnf.conf.PRIO_MAINCONFIG)
+        return list(base.conf.reposdir)
+
+
 def get_parsed_repofiles(context=mounting.NotIsolatedActions(base_dir='/')):
     """
     Scan all repositories on the system.
 
-    Repositories are scanned under /etc/yum.repos.d/ of the given context.
-    By default the context is the host system.
+    Repositories are scanned under repository directories (as reported by dnf)
+    of the given context. By default the context is the host system.
 
     ATTENTION: Do not forget to ensure the redhat.repo file is regenerated
     by RHSM when used.
@@ -50,8 +64,8 @@ def get_parsed_repofiles(context=mounting.NotIsolatedActions(base_dir='/')):
     :rtype: List(RepositoryFile)
     """
     repofiles = []
-    cmd = ['find', '/etc/yum.repos.d/', '-type', 'f', '-name', '*.repo']
-    repofiles_paths = context.call(cmd, split=True)['stdout']
+    cmd = ['find'] + get_repodirs() + ['-maxdepth', '1', '-type', 'f', '-name', '*.repo']
+    repofiles_paths = context.call(cmd, split=True, checked=False)['stdout']
     for repofile_path in repofiles_paths:
         repofile = parse_repofile(context.full_path(repofile_path))
         # we want full path in cotext, not the real full path
